@@ -43,12 +43,41 @@ if uploaded_file:
             sound = AudioSegment.from_wav(temp_file_path)
             sound.export(wav_path, format="wav")
 
-        # Ses tanıma
+        # Ses dosyasını yükle
+        audio = AudioSegment.from_wav(wav_path)
+        
+        # Ses dosyasını 30 saniyelik parçalara böl
+        chunk_length_ms = 30000  # 30 saniye
+        chunks = [audio[i:i + chunk_length_ms] for i in range(0, len(audio), chunk_length_ms)]
+        
+        st.info(f"🎧 Ses {len(chunks)} parçaya bölündü ve çözümleniyor...")
+        
+        # Her parçayı tanıma
         recognizer = sr.Recognizer()
-        with sr.AudioFile(wav_path) as source:
-            audio_data = recognizer.record(source)
-            st.info("🎧 Ses çözümleniyor, lütfen bekleyin...")
-            text = recognizer.recognize_google(audio_data, language="tr-TR")
+        full_text = []
+        
+        progress_bar = st.progress(0)
+        for idx, chunk in enumerate(chunks):
+            # Her parçayı geçici WAV dosyası olarak kaydet
+            chunk_path = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
+            chunk.export(chunk_path, format="wav")
+            
+            try:
+                with sr.AudioFile(chunk_path) as source:
+                    audio_data = recognizer.record(source)
+                    chunk_text = recognizer.recognize_google(audio_data, language="tr-TR")
+                    full_text.append(chunk_text)
+            except sr.UnknownValueError:
+                st.warning(f"⚠️ {idx + 1}. parça anlaşılamadı, atlaniyor...")
+            except sr.RequestError as e:
+                st.error(f"❌ Google API hatası: {e}")
+                raise
+            finally:
+                os.unlink(chunk_path)
+            
+            progress_bar.progress((idx + 1) / len(chunks))
+        
+        text = " ".join(full_text)
 
         st.success("✅ Dönüştürme tamamlandı!")
         edited_text = st.text_area("Metni düzenleyebilirsiniz:", value=text, height=300)
